@@ -1,17 +1,5 @@
-# demoprueba
+# Minijuego 1v1
 
-A new Flutter project.
+Este es un avance del proyecto final para el curso de Programación para Dispositivos Móviles. La aplicación está desarrollada en Flutter y utiliza Firebase Cloud Firestore para conectar a dos jugadores en tiempo real.
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+El juego consistirá en una competencia rápida por turnos donde los jugadores deben escribir palabras válidas que contengan una secuencia aleatoria de letras generada por el sistema. Si un jugador falla, su porcentaje de riesgo de eliminación aumenta en un 10%.
