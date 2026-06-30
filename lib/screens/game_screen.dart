@@ -3,8 +3,8 @@ import '../models/game_room_model.dart';
 import '../viewmodels/game_viewmodel.dart';
 
 class GameScreen extends StatefulWidget {
-  final String miId;    // 'jugador_1' o 'jugador_2'
-  final String roomId;  // ID dinámico de la sala
+  final String miId;
+  final String roomId;
 
   const GameScreen({
     super.key,
@@ -18,37 +18,48 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   late final TextEditingController palabraController;
-
-  // Instanciamos el ViewModel (Cerebro de la arquitectura MVVM)
   final GameViewModel _viewModel = GameViewModel();
 
   @override
   void initState() {
     super.initState();
     palabraController = TextEditingController();
-
-    // 🎵 ¡QUE EMPIECE EL REVENTÓN DE MVC2!
-    // Esto arranca tu playlist automática en bucle apenas entras a la partida
     _viewModel.startBackgroundMusic();
   }
 
   @override
   void dispose() {
     palabraController.dispose();
-    _viewModel.stopMusic(); // 🔇 Apagamos el reproductor para que la música no siga sonando en los menús
+    _viewModel.stopMusic();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Sala: ${widget.roomId}'),
         centerTitle: true,
+        // 🔇 BOTÓN DE MUTE EN LA BARRA SUPERIOR
+        actions: [
+          ListenableBuilder(
+            listenable: _viewModel,
+            builder: (context, _) {
+              return IconButton(
+                icon: Icon(
+                  _viewModel.isMuted ? Icons.volume_off : Icons.volume_up,
+                  color: theme.colorScheme.secondary,
+                ),
+                onPressed: () => _viewModel.toggleMute(),
+              );
+            },
+          )
+        ],
       ),
       body: Center(
         child: StreamBuilder<GameRoom>(
-          // MVVM: La vista le pide el Stream de datos al ViewModel, no a Firebase ni al Repo
           stream: _viewModel.getRoomStream(widget.roomId),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
@@ -56,7 +67,7 @@ class _GameScreenState extends State<GameScreen> {
                 padding: const EdgeInsets.all(20.0),
                 child: Text(
                   "Error en la sala:\n${snapshot.error}",
-                  style: const TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: theme.colorScheme.error, fontSize: 18, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
               );
@@ -75,6 +86,7 @@ class _GameScreenState extends State<GameScreen> {
 
             final GameRoom room = snapshot.data!;
             final bool esMiTurno = room.isMyTurn(widget.miId);
+            final int miPeligroActual = (widget.miId == "jugador_1") ? room.dangerJ1 : room.dangerJ2;
 
             if (room.status == RoomStatus.finished) {
               final bool yoPerdi = (room.loserId == widget.miId);
@@ -88,7 +100,7 @@ class _GameScreenState extends State<GameScreen> {
                       style: TextStyle(
                           fontSize: 34,
                           fontWeight: FontWeight.bold,
-                          color: yoPerdi ? Colors.red : Colors.green
+                          color: yoPerdi ? theme.colorScheme.error : Colors.green
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -102,16 +114,26 @@ class _GameScreenState extends State<GameScreen> {
                     const SizedBox(height: 40),
                     ElevatedButton(
                       onPressed: () {
-                        // Acción al terminar partida
+                        Navigator.pop(context);
                       },
-                      child: const Text('Partida Terminada'),
+                      child: const Text('Volver al Menú'),
                     )
                   ],
                 ),
               );
             }
 
-            // Usamos ListenableBuilder para escuchar el estado de carga (isLoading) del ViewModel
+            // ⏱️ Sincronizamos el temporizador de 6 segundos y el castigo automático de MVVM
+            if (_viewModel.displayedSequence == "TE") {
+              _viewModel.startSyllableRotation(
+                initialSequence: room.currentSequence,
+                esMiTurno: esMiTurno,
+                roomId: room.id,
+                miId: widget.miId,
+                miPeligroActual: miPeligroActual,
+              );
+            }
+
             return ListenableBuilder(
                 listenable: _viewModel,
                 builder: (context, _) {
@@ -128,7 +150,7 @@ class _GameScreenState extends State<GameScreen> {
                                     title: 'Jugador 1 ${widget.miId == 'jugador_1' ? '(Tú)' : ''}',
                                     danger: room.dangerJ1,
                                     isActive: room.currentTurn == 'jugador_1',
-                                    color: Colors.green,
+                                    activeColor: theme.colorScheme.primary,
                                   ),
                                 ),
                                 const Padding(
@@ -140,7 +162,7 @@ class _GameScreenState extends State<GameScreen> {
                                     title: 'Jugador 2 ${widget.miId == 'jugador_2' ? '(Tú)' : ''}',
                                     danger: room.dangerJ2,
                                     isActive: room.currentTurn == 'jugador_2',
-                                    color: Colors.deepPurple,
+                                    activeColor: theme.colorScheme.secondary,
                                   ),
                                 ),
                               ],
@@ -152,7 +174,7 @@ class _GameScreenState extends State<GameScreen> {
                               style: TextStyle(
                                   fontSize: 28,
                                   fontWeight: FontWeight.bold,
-                                  color: esMiTurno ? Colors.green : Colors.red
+                                  color: esMiTurno ? theme.colorScheme.primary : Colors.grey
                               ),
                             ),
                             const SizedBox(height: 25),
@@ -162,16 +184,34 @@ class _GameScreenState extends State<GameScreen> {
                               height: 140,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                border: Border.all(color: esMiTurno ? Colors.green : Colors.grey, width: 4),
+                                color: theme.colorScheme.surface,
+                                border: Border.all(
+                                    color: esMiTurno ? theme.colorScheme.primary : Colors.grey.shade700,
+                                    width: 4
+                                ),
+                                boxShadow: [
+                                  if (esMiTurno)
+                                    BoxShadow(
+                                      color: theme.colorScheme.primary.withAlpha(50),
+                                      blurRadius: 15,
+                                      spreadRadius: 2,
+                                    )
+                                ],
                               ),
                               child: Center(
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     const Text("Palabra con:", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                                    const SizedBox(height: 4),
                                     Text(
-                                      room.currentSequence,
-                                      style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: 2),
+                                      _viewModel.displayedSequence,
+                                      style: TextStyle(
+                                          fontSize: 36,
+                                          fontWeight: FontWeight.w900,
+                                          color: esMiTurno ? theme.colorScheme.secondary : Colors.white,
+                                          letterSpacing: 2
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -185,7 +225,11 @@ class _GameScreenState extends State<GameScreen> {
                               textCapitalization: TextCapitalization.characters,
                               decoration: InputDecoration(
                                 border: const OutlineInputBorder(),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
+                                ),
                                 labelText: esMiTurno ? 'Escribe tu palabra aquí' : 'Esperando...',
+                                labelStyle: TextStyle(color: esMiTurno ? theme.colorScheme.secondary : Colors.grey),
                               ),
                             ),
                             const SizedBox(height: 30),
@@ -195,8 +239,10 @@ class _GameScreenState extends State<GameScreen> {
                                 children: [
                                   ElevatedButton(
                                     style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                        foregroundColor: Colors.white
+                                      backgroundColor: theme.colorScheme.primary,
+                                      foregroundColor: Colors.white,
+                                      minimumSize: const Size.fromHeight(50),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
                                     onPressed: _viewModel.isLoading
                                         ? null
@@ -204,33 +250,32 @@ class _GameScreenState extends State<GameScreen> {
                                       palabraController.clear();
                                       String siguiente = (widget.miId == "jugador_1") ? "jugador_2" : "jugador_1";
 
-                                      // MVVM: La Vista le dice al ViewModel qué quiere hacer
                                       await _viewModel.sendValidWord(roomId: room.id, nextTurnId: siguiente);
                                     },
-                                    child: const Text('Enviar Palabra (Acierto)'),
+                                    child: const Text('Enviar Palabra (Acierto)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 14),
                                   OutlinedButton(
                                     style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(color: Colors.red, width: 2),
-                                        foregroundColor: Colors.red
+                                      side: BorderSide(color: theme.colorScheme.error, width: 2),
+                                      foregroundColor: theme.colorScheme.error,
+                                      minimumSize: const Size.fromHeight(50),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
                                     onPressed: _viewModel.isLoading
                                         ? null
                                         : () async {
                                       palabraController.clear();
                                       String siguiente = (widget.miId == "jugador_1") ? "jugador_2" : "jugador_1";
-                                      int peligroActual = (widget.miId == "jugador_1") ? room.dangerJ1 : room.dangerJ2;
 
-                                      // MVVM: Reportamos el error directamente a través del ViewModel
                                       await _viewModel.handleTurnError(
                                         roomId: room.id,
                                         currentTurnId: widget.miId,
-                                        currentDanger: peligroActual,
+                                        currentDanger: miPeligroActual,
                                         nextTurnId: siguiente,
                                       );
                                     },
-                                    child: const Text('Cometer Error (+10%)'),
+                                    child: const Text('Cometer Error (+10%)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                                   ),
                                 ],
                               )
@@ -243,12 +288,11 @@ class _GameScreenState extends State<GameScreen> {
                         ),
                       ),
 
-                      // Capa transparente que bloquea la pantalla si el ViewModel está cargando algo de Firebase
                       if (_viewModel.isLoading)
                         Container(
-                          color: Colors.black12,
-                          child: const Center(
-                            child: CircularProgressIndicator(),
+                          color: Colors.black45,
+                          child: Center(
+                            child: CircularProgressIndicator(color: theme.colorScheme.primary),
                           ),
                         ),
                     ],
@@ -266,29 +310,37 @@ class _PlayerScoreCard extends StatelessWidget {
   final String title;
   final int danger;
   final bool isActive;
-  final Color color;
+  final Color activeColor;
 
   const _PlayerScoreCard({
     required this.title,
     required this.danger,
     required this.isActive,
-    required this.color,
+    required this.activeColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isActive ? color.withAlpha(38) : Colors.grey.withAlpha(25),
+        color: isActive ? activeColor.withAlpha(30) : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isActive ? color : Colors.transparent, width: 2),
+        border: Border.all(color: isActive ? activeColor : Colors.transparent, width: 2),
       ),
       child: Column(
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          const SizedBox(height: 4),
-          Text('$danger% muerte', style: TextStyle(color: danger > 0 ? Colors.orange[900] : Colors.grey, fontWeight: FontWeight.bold)),
+          Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isActive ? Colors.white : Colors.grey)),
+          const SizedBox(height: 6),
+          Text(
+            '$danger% muerte',
+            style: TextStyle(
+                color: danger > 40 ? theme.colorScheme.error : (danger > 0 ? theme.colorScheme.secondary : Colors.grey),
+                fontWeight: FontWeight.bold
+            ),
+          ),
         ],
       ),
     );

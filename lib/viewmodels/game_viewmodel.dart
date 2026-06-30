@@ -1,54 +1,98 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../models/game_room_model.dart';
 import '../repositories/game_repository.dart';
 
 class GameViewModel extends ChangeNotifier {
+  // 🛠️ Corregido aquí para que compile perfecto:
   final GameRepository _repository = GameRepository();
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
-  // 🎵 TU PLAYLIST REAL DE MARVEL VS CAPCOM 2
+  // 🎵 PLAYLIST DE MVC2 Y MUTE
   final List<String> _playlist = [
     'audio/mvc2_carnival.mp3',
     'audio/mvc2_factory.mp3',
     'audio/mvc2_swamp.mp3',
   ];
-
   int _currentSongIndex = 0;
+  bool _isMuted = false;
+  bool get isMuted => _isMuted;
 
-  // 🕹️ INICIAR LA MÚSICA EN CADENA AUTOMÁTICA
+  // 🔤 ROTACIÓN DE SÍLABAS (6 SEGUNDOS)
+  Timer? _rotationTimer;
+  String _displayedSequence = "TE";
+  String get displayedSequence => _displayedSequence;
+
+  final List<String> _syllablesPool = ["TE", "MA", "CO", "PA", "FI", "RE", "LU", "CA", "BO"];
+  int _syllableIndex = 0;
+
+  // Inicia la rotación cada 6 segundos con castigo automático si se agota el tiempo
+  void startSyllableRotation({
+    required String initialSequence,
+    required bool esMiTurno,
+    required String roomId,
+    required String miId,
+    required int miPeligroActual,
+  }) {
+    _rotationTimer?.cancel();
+    _displayedSequence = initialSequence;
+
+    _rotationTimer = Timer.periodic(const Duration(milliseconds: 6000), (timer) async {
+      if (esMiTurno && !_isLoading) {
+        String siguiente = (miId == "jugador_1") ? "jugador_2" : "jugador_1";
+
+        await handleTurnError(
+          roomId: roomId,
+          currentTurnId: miId,
+          currentDanger: miPeligroActual,
+          nextTurnId: siguiente,
+        );
+      }
+
+      _syllableIndex = (_syllableIndex + 1) % _syllablesPool.length;
+      _displayedSequence = _syllablesPool[_syllableIndex];
+      notifyListeners();
+    });
+  }
+
+  void stopSyllableRotation() {
+    _rotationTimer?.cancel();
+  }
+
+  // CONTROLES DE AUDIO
   Future<void> startBackgroundMusic() async {
     try {
-      // Configuramos para que libere la canción al terminar y permita saltar a la otra
       await _audioPlayer.setReleaseMode(ReleaseMode.release);
-
-      // Creamos el "oído" que escucha cuando termina un tema para poner el siguiente
       _audioPlayer.onPlayerComplete.listen((event) {
         _playNextSong();
       });
-
-      // Arrancamos con el primer temazo de la lista
       await _audioPlayer.play(AssetSource(_playlist[_currentSongIndex]));
+      if (_isMuted) await _audioPlayer.setVolume(0);
     } catch (e) {
       debugPrint("Error al reproducir audio: $e");
     }
   }
 
-  // 🔄 FUNCIÓN INTERNA PARA PASAR AL SIGUIENTE TEMA
   Future<void> _playNextSong() async {
     try {
-      // Avanza en la lista, si llega al final vuelve a empezar desde 0
       _currentSongIndex = (_currentSongIndex + 1) % _playlist.length;
       await _audioPlayer.play(AssetSource(_playlist[_currentSongIndex]));
+      await _audioPlayer.setVolume(_isMuted ? 0 : 1);
     } catch (e) {
       debugPrint("Error al cambiar de canción: $e");
     }
   }
 
-  // 🔇 APAGAR TODO AL SALIR DE LA PARTIDA
+  void toggleMute() {
+    _isMuted = !_isMuted;
+    _audioPlayer.setVolume(_isMuted ? 0 : 1);
+    notifyListeners();
+  }
+
   Future<void> stopMusic() async {
     try {
       await _audioPlayer.stop();
@@ -66,7 +110,7 @@ class GameViewModel extends ChangeNotifier {
     try {
       await _repository.changeTurn(roomId: roomId, nextTurnId: nextTurnId);
     } catch (e) {
-      // Manejo silencioso de errores
+      // Silencioso
     } finally {
       _setLoading(false);
     }
@@ -87,7 +131,7 @@ class GameViewModel extends ChangeNotifier {
         nextTurnId: nextTurnId,
       );
     } catch (e) {
-      // Manejo silencioso de errores
+      // Silencioso
     } finally {
       _setLoading(false);
     }
@@ -100,6 +144,7 @@ class GameViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _rotationTimer?.cancel();
     _audioPlayer.dispose();
     super.dispose();
   }
