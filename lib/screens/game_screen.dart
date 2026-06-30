@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:math'; //Librería para números al azar
+import '../models/game_room_model.dart';
+import '../repositories/game_repository.dart';
 
-//Usa StatefulWidget para controlar el texto escrito sin perder datos
 class GameScreen extends StatefulWidget {
-  final String miId; //Guarda si es el jugador 1 o el jugador 2
+  final String miId;    // 'jugador_1' o 'jugador_2'
+  final String roomId;  // ID dinámico de la sala
 
-  const GameScreen({super.key, required this.miId});
+  const GameScreen({
+    super.key,
+    required this.miId,
+    required this.roomId,
+  });
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -14,6 +18,8 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   late final TextEditingController palabraController;
+  // Instanciamos nuestro repositorio limpio
+  final GameRepository _gameRepository = GameRepository();
 
   @override
   void initState() {
@@ -23,88 +29,51 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   void dispose() {
-    //Limpiamos el control de texto de la memoria al salir de la pantalla
     palabraController.dispose();
     super.dispose();
-  }
-
-  //Cambia el turno del jugador actual en la base de datos
-  void cambiarTurno(String siguienteTurno) {
-    FirebaseFirestore.instance
-        .collection('partidas')
-        .doc('sala_prueba')
-        .update({'turno_de': siguienteTurno});
-  }
-
-  //Suma 10% de peligro y calcula al azar si el jugador queda eliminado
-  void registrarError(String jugadorClave, int riesgoActual, String siguienteTurno) {
-    int nuevoRiesgo = riesgoActual + 10;
-
-    int dado = Random().nextInt(100);
-
-    bool esMuerteEfectiva = (dado < nuevoRiesgo);
-
-    if (esMuerteEfectiva) {
-      FirebaseFirestore.instance
-          .collection('partidas')
-          .doc('sala_prueba')
-          .update({
-        jugadorClave: nuevoRiesgo,
-        'estado': 'finalizado',
-        'perdedor': widget.miId,
-      });
-    } else {
-      FirebaseFirestore.instance
-          .collection('partidas')
-          .doc('sala_prueba')
-          .update({
-        jugadorClave: nuevoRiesgo,
-        'turno_de': siguienteTurno,
-      });
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sala de juego'),
+        title: Text('Sala: ${widget.roomId}'),
         centerTitle: true,
       ),
       body: Center(
-        child: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('partidas').doc('sala_prueba').snapshots(),
+        child: StreamBuilder<GameRoom>(
+          // Consumimos el Stream tipado desde nuestro repositorio
+          stream: _gameRepository.watchRoom(widget.roomId),
           builder: (context, snapshot) {
-
             if (snapshot.hasError) {
               return Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Text(
-                  "Error detectado:\n${snapshot.error}",
+                  "Error en la sala:\n${snapshot.error}",
                   style: const TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
               );
             }
 
-            if (!snapshot.hasData || !snapshot.data!.exists) {
+            if (!snapshot.hasData) {
               return const Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 15),
-                  Text("Conectando con Firestore...", style: TextStyle(color: Colors.grey)),
+                  Text("Sincronizando partida...", style: TextStyle(color: Colors.grey)),
                 ],
               );
             }
 
-            var datos = snapshot.data!.data() as Map<String, dynamic>;
-            String estadoPartida = datos['estado'] ?? 'activa';
-            String perdedor = datos['perdedor'] ?? '';
+            // Aquí capturamos nuestra clase de datos segura
+            final GameRoom room = snapshot.data!;
+            final bool esMiTurno = room.isMyTurn(widget.miId);
 
-            //Muestra la pantalla de victoria o derrota si la partida terminó
-            if (estadoPartida == 'finalizado') {
-              bool yoPerdi = (perdedor == widget.miId);
+            // 1. Validamos el estado del juego con enums
+            if (room.status == RoomStatus.finished) {
+              final bool yoPerdi = (room.loserId == widget.miId);
               return Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
@@ -121,93 +90,46 @@ class _GameScreenState extends State<GameScreen> {
                     const SizedBox(height: 20),
                     Text(
                       yoPerdi
-                          ? "Tu porcentaje de riesgo te eliminó"
-                          : "¡Felicidades! Tu oponente perdió debido a su porcentaje de riesgo",
+                          ? "El yunque cayó sobre ti. ¡Suerte la próxima!"
+                          : "¡Felicidades! Tu oponente fue aplastado por el yunque.",
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w500),
+                      style: const TextStyle(fontSize: 18, color: Colors.grey),
                     ),
                     const SizedBox(height: 40),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(220, 48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () {
-                        FirebaseFirestore.instance.collection('partidas').doc('sala_prueba').set({
-                          'turno_de': 'jugador_1',
-                          'peligro_j1': 0,
-                          'peligro_j2': 0,
-                          'secuencia': 'TE',
-                          'estado': 'activa',
-                          'perdedor': ''
-                        });
-                      },
-                      child: const Text('Reiniciar sala de juego', style: TextStyle(fontSize: 16)),
+                      onPressed: () => _gameRepository.resetRoom(room.id),
+                      child: const Text('Reiniciar partida'),
                     )
                   ],
                 ),
               );
             }
 
-            String turnoDe = datos['turno_de'] ?? '';
-            bool esMiTurno = (turnoDe == widget.miId);
-
-            String secuenciaLetras = datos['secuencia'] ?? 'TE';
-            int peligroJ1 = datos['peligro_j1'] ?? 0;
-            int peligroJ2 = datos['peligro_j2'] ?? 0;
-
             return SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 children: [
-
-                  //Tarjetas para ver los porcentajes de ambos jugadores en tiempo real
+                  // Marcador de peligro dinámico
                   Row(
                     children: [
                       Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: turnoDe == 'jugador_1' ? Colors.green.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: turnoDe == 'jugador_1' ? Colors.green : Colors.transparent, width: 2),
-                          ),
-                          child: Column(
-                            children: [
-                              Text('Jugador 1 ${widget.miId == 'jugador_1' ? '(Tú)' : ''}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                              const SizedBox(height: 4),
-                              Text('$peligroJ1% muerte',
-                                  style: TextStyle(color: peligroJ1 > 0 ? Colors.orange[900] : Colors.grey, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
+                        child: _PlayerScoreCard(
+                          title: 'Jugador 1 ${widget.miId == 'jugador_1' ? '(Tú)' : ''}',
+                          danger: room.dangerJ1,
+                          isActive: room.currentTurn == 'jugador_1',
+                          color: Colors.green,
                         ),
                       ),
-
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 10),
                         child: Text('VS', style: TextStyle(fontWeight: FontWeight.w900, color: Colors.grey)),
                       ),
-
                       Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: turnoDe == 'jugador_2' ? Colors.deepPurple.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: turnoDe == 'jugador_2' ? Colors.deepPurple : Colors.transparent, width: 2),
-                          ),
-                          child: Column(
-                            children: [
-                              Text('Jugador 2 ${widget.miId == 'jugador_2' ? '(Tú)' : ''}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                              const SizedBox(height: 4),
-                              Text('$peligroJ2% muerte',
-                                  style: TextStyle(color: peligroJ2 > 0 ? Colors.orange[900] : Colors.grey, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
+                        child: _PlayerScoreCard(
+                          title: 'Jugador 2 ${widget.miId == 'jugador_2' ? '(Tú)' : ''}',
+                          danger: room.dangerJ2,
+                          isActive: room.currentTurn == 'jugador_2',
+                          color: Colors.deepPurple,
                         ),
                       ),
                     ],
@@ -224,6 +146,7 @@ class _GameScreenState extends State<GameScreen> {
                   ),
                   const SizedBox(height: 25),
 
+                  // Contenedor de la secuencia de letras
                   Container(
                     width: 140,
                     height: 140,
@@ -237,7 +160,7 @@ class _GameScreenState extends State<GameScreen> {
                         children: [
                           const Text("Palabra con:", style: TextStyle(color: Colors.grey, fontSize: 13)),
                           Text(
-                            secuenciaLetras,
+                            room.currentSequence,
                             style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: 2),
                           ),
                         ],
@@ -253,46 +176,39 @@ class _GameScreenState extends State<GameScreen> {
                     decoration: InputDecoration(
                       border: const OutlineInputBorder(),
                       labelText: esMiTurno ? 'Escribe tu palabra aquí' : 'Esperando...',
-                      hintText: 'Ej. TENEDOR',
-                      prefixIcon: const Icon(Icons.abc),
                     ),
                   ),
                   const SizedBox(height: 30),
 
-                  //Botones para simular jugadas durante la exposición de la demo
+                  // Botones de simulación llamando al repositorio ordenadamente
                   if (esMiTurno)
                     Column(
                       children: [
                         ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size(220, 45),
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
                           onPressed: () {
                             palabraController.clear();
                             String siguiente = (widget.miId == "jugador_1") ? "jugador_2" : "jugador_1";
-                            cambiarTurno(siguiente);
+                            _gameRepository.changeTurn(roomId: room.id, nextTurnId: siguiente);
                           },
                           child: const Text('Enviar Palabra (Acierto)'),
                         ),
                         const SizedBox(height: 12),
-
                         OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(220, 45),
-                            side: const BorderSide(color: Colors.red, width: 2),
-                            foregroundColor: Colors.red,
-                          ),
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red, width: 2), foregroundColor: Colors.red),
                           onPressed: () {
                             palabraController.clear();
-                            String jugadorClave = (widget.miId == "jugador_1") ? 'peligro_j1' : 'peligro_j2';
-                            int riesgoActual = (widget.miId == "jugador_1") ? peligroJ1 : peligroJ2;
-                            String siguiendo = (widget.miId == "jugador_1") ? "jugador_2" : "jugador_1";
+                            String siguiente = (widget.miId == "jugador_1") ? "jugador_2" : "jugador_1";
+                            int peligroActual = (widget.miId == "jugador_1") ? room.dangerJ1 : room.dangerJ2;
 
-                            registrarError(jugadorClave, riesgoActual, siguiendo);
+                            _gameRepository.processTurnError(
+                              roomId: room.id,
+                              currentTurnId: widget.miId,
+                              currentDanger: peligroActual,
+                              nextTurnId: siguiente,
+                            );
                           },
-                          child: const Text('Cometer Error (+10%)', style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text('Cometer Error (+10%)'),
                         ),
                       ],
                     )
@@ -306,6 +222,40 @@ class _GameScreenState extends State<GameScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+// Un sub-widget pequeño y limpio para las tarjetas de puntuación
+class _PlayerScoreCard extends StatelessWidget {
+  final String title;
+  final int danger;
+  final bool isActive;
+  final Color color;
+
+  const _PlayerScoreCard({
+    required this.title,
+    required this.danger,
+    required this.isActive,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isActive ? color.withAlpha(38) : Colors.grey.withAlpha(25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isActive ? color : Colors.transparent, width: 2),
+      ),
+      child: Column(
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 4),
+          Text('$danger% muerte', style: TextStyle(color: danger > 0 ? Colors.orange[900] : Colors.grey, fontWeight: FontWeight.bold)),
+        ],
       ),
     );
   }
