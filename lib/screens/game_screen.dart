@@ -26,11 +26,16 @@ class _GameScreenState extends State<GameScreen> {
   void initState() {
     super.initState();
     palabraController = TextEditingController();
+
+    // 🎵 ¡QUE EMPIECE EL REVENTÓN DE MVC2!
+    // Esto arranca tu playlist automática en bucle apenas entras a la partida
+    _viewModel.startBackgroundMusic();
   }
 
   @override
   void dispose() {
     palabraController.dispose();
+    _viewModel.stopMusic(); // 🔇 Apagamos el reproductor para que la música no siga sonando en los menús
     super.dispose();
   }
 
@@ -96,10 +101,8 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                     const SizedBox(height: 40),
                     ElevatedButton(
-                      // MVVM: Delegamos la acción al ViewModel (usando el método alternativo si es necesario o manejando lógica del repo)
                       onPressed: () {
-                        // En un MVVM estricto esto se maneja en el ViewModel,
-                        // por ahora lo conectamos directo a través del flujo existente si es necesario
+                        // Acción al terminar partida
                       },
                       child: const Text('Partida Terminada'),
                     )
